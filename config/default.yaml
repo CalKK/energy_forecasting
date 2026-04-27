@@ -1,0 +1,72 @@
+project:
+  name: "kapelbok_energy_forecast"
+  random_seed: 42
+
+data:
+  path: "January to April Kapelbok.xlsx"
+  sheet_name: "Foglio1"
+  datetime_col: "localtime_hour"
+  target_col: "kilowatt_hours"
+  id_col: "serial"
+  system_col: "system"
+  sample_serials: null
+  required_columns:
+    - serial
+    - localtime_hour
+    - last_energy
+    - kilowatt_hours
+    - voltage_min
+    - voltage_avg
+    - voltage_max
+    - current_max
+    - system
+
+aggregation:
+  level: "system_total"
+  frequency: "h"
+  target_agg: "sum"
+  numeric_agg: "mean"
+  fill_target_method: "zero"
+  fill_exog_method: "interpolate"
+
+features:
+  calendar:
+    include_hour: true
+    include_day_of_week: true
+    include_month: true
+    include_weekend: true
+    include_cyclical: true
+  lags: [1, 24, 48, 168]
+  rolling_windows: [24, 168]
+  exogenous_columns:
+    - last_energy
+    - voltage_min
+    - voltage_avg
+    - voltage_max
+    - current_max
+
+forecast:
+  horizon_hours: 168
+  test_days: 14
+  confidence_alpha: 0.05
+
+models:
+  baseline:
+    seasonal_period: 24
+  linear:
+    alpha: 1.0
+  structural_time_series:
+    level: "local level"
+    daily_period: 24
+    weekly_period: 168
+    weekly_harmonics: 3
+    maxiter: 250
+    use_exogenous: false
+
+outputs:
+  directory: "outputs"
+  profile_file: "data_profile.json"
+  metrics_file: "metrics.csv"
+  forecast_file: "forecast.csv"
+  plot_file: "forecast_plot.png"
+  model_file: "trained_model.joblib"
