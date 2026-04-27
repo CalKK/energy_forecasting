@@ -1,19 +1,59 @@
 from pathlib import Path
+import importlib.util
 import sys
 
 import pandas as pd
 import streamlit as st
 
 APP_DIR = Path(__file__).resolve().parent
-SRC_DIR = APP_DIR / "src"
 DEFAULT_CONFIG_PATH = APP_DIR / "config" / "default.yaml"
 
-# Resolve imports relative to this file so the app works in hosted environments.
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
-from energy_modeling.config import load_settings
-from energy_modeling.pipeline import run_training
+def load_local_package_from_src() -> Path:
+    candidate_package_dirs = [
+        APP_DIR / "src" / "energy_modeling",
+        Path.cwd() / "src" / "energy_modeling",
+        APP_DIR.parent / "src" / "energy_modeling",
+    ]
+    package_dir = next((path for path in candidate_package_dirs if path.exists()), None)
+    if package_dir is None:
+        searched = "\n".join(str(path) for path in candidate_package_dirs)
+        raise ImportError(f"Could not find local package directory.\nSearched:\n{searched}")
+
+    if "energy_modeling" not in sys.modules:
+        init_file = package_dir / "__init__.py"
+        spec = importlib.util.spec_from_file_location(
+            "energy_modeling",
+            init_file,
+            submodule_search_locations=[str(package_dir)],
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create import spec for {init_file}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["energy_modeling"] = module
+        spec.loader.exec_module(module)
+
+    return package_dir
+
+
+try:
+    PACKAGE_DIR = load_local_package_from_src()
+    from energy_modeling.config import load_settings
+    from energy_modeling.pipeline import run_training
+except ImportError as exc:
+    st.set_page_config(page_title="Energy Forecasting System", layout="wide")
+    st.error("Failed to load the local `energy_modeling` package from `src/`.")
+    st.code(
+        "\n".join(
+            [
+                f"APP_DIR={APP_DIR}",
+                f"CWD={Path.cwd()}",
+                f"PACKAGE_DIR={locals().get('PACKAGE_DIR', 'not found')}",
+                f"ImportError={exc}",
+            ]
+        )
+    )
+    st.stop()
 
 
 def resolve_config_path(raw_path: str) -> Path:
