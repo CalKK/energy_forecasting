@@ -62,11 +62,3 @@ models:
     weekly_harmonics: 3
     maxiter: 250
     use_exogenous: false
-
-outputs:
-  directory: "outputs"
-  profile_file: "data_profile.json"
-  metrics_file: "metrics.csv"
-  forecast_file: "forecast.csv"
-  plot_file: "forecast_plot.png"
-  model_file: "trained_model.joblib"
