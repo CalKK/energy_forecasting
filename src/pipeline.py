@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
+from typing import Any
 import joblib
 import pandas as pd
 
@@ -14,7 +16,7 @@ from energy_modeling.features import (
     time_train_test_split,
 )
 from energy_modeling.models import LinearFeatureForecaster, SeasonalNaiveForecaster, StructuralTimeSeriesForecaster
-from energy_modeling.plotting import plot_forecast
+from energy_modeling.plotting import plot_forecast, plot_forecast_bytes
 
 
 def load_and_prepare(settings: Settings, df: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -78,8 +80,12 @@ def run_profile(settings: Settings, df: pd.DataFrame | None = None) -> dict:
     )
 
 
-def run_training(settings: Settings, df: pd.DataFrame | None = None) -> dict[str, Path]:
-    out_dir = ensure_output_dir(settings)
+def run_training(
+    settings: Settings,
+    df: pd.DataFrame | None = None,
+    persist_artifacts: bool = True,
+) -> dict[str, Any]:
+    out_dir = ensure_output_dir(settings) if persist_artifacts else None
     target_col = settings.get("data", "target_col", default="kilowatt_hours")
     frame = load_and_prepare(settings, df=df)
 
@@ -133,8 +139,6 @@ def run_training(settings: Settings, df: pd.DataFrame | None = None) -> dict[str
     metric_rows.append({"model": "structural_time_series", **regression_metrics(test_y, sts_pred["forecast"])})
 
     metrics = metrics_table(metric_rows).sort_values("mae")
-    metrics_path = out_dir / settings.get("outputs", "metrics_file", default="metrics.csv")
-    metrics.to_csv(metrics_path, index=False)
 
     forecast_eval = pd.DataFrame(
         {
@@ -146,17 +150,6 @@ def run_training(settings: Settings, df: pd.DataFrame | None = None) -> dict[str
             "sts_upper": sts_pred["upper"].reindex(test_y.index).values,
         }
     )
-    forecast_path = out_dir / settings.get("outputs", "forecast_file", default="forecast.csv")
-    forecast_eval.to_csv(forecast_path, index=False)
-
-    plot_path = out_dir / settings.get("outputs", "plot_file", default="forecast_plot.png")
-    plot_forecast(
-        actual=test_y,
-        forecast=sts_pred,
-        output_path=plot_path,
-        title="Kapelbok Structural Time Series Forecast",
-    )
-
     model_bundle = {
         "selected_model": "structural_time_series",
         "model": sts,
@@ -166,14 +159,43 @@ def run_training(settings: Settings, df: pd.DataFrame | None = None) -> dict[str
         "target_col": target_col,
         "metrics": metrics,
     }
-    model_path = out_dir / settings.get("outputs", "model_file", default="trained_model.joblib")
-    joblib.dump(model_bundle, model_path)
+    if persist_artifacts:
+        metrics_path = out_dir / settings.get("outputs", "metrics_file", default="metrics.csv")
+        metrics.to_csv(metrics_path, index=False)
+
+        forecast_path = out_dir / settings.get("outputs", "forecast_file", default="forecast.csv")
+        forecast_eval.to_csv(forecast_path, index=False)
+
+        plot_path = out_dir / settings.get("outputs", "plot_file", default="forecast_plot.png")
+        plot_forecast(
+            actual=test_y,
+            forecast=sts_pred,
+            output_path=plot_path,
+            title="Kapelbok Structural Time Series Forecast",
+        )
+
+        model_path = out_dir / settings.get("outputs", "model_file", default="trained_model.joblib")
+        joblib.dump(model_bundle, model_path)
+
+        return {
+            "metrics": metrics_path,
+            "forecast": forecast_path,
+            "plot": plot_path,
+            "model": model_path,
+        }
+
+    model_buffer = BytesIO()
+    joblib.dump(model_bundle, model_buffer)
 
     return {
-        "metrics": metrics_path,
-        "forecast": forecast_path,
-        "plot": plot_path,
-        "model": model_path,
+        "metrics_df": metrics,
+        "forecast_df": forecast_eval,
+        "plot_bytes": plot_forecast_bytes(
+            actual=test_y,
+            forecast=sts_pred,
+            title="Kapelbok Structural Time Series Forecast",
+        ),
+        "model_bytes": model_buffer.getvalue(),
     }
 
 
