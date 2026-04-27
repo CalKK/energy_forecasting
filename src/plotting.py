@@ -1,19 +1,16 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def plot_forecast(
+def _build_forecast_figure(
     actual: pd.Series,
     forecast: pd.DataFrame | pd.Series,
-    output_path: str | Path,
     title: str = "Energy Forecast",
-) -> None:
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
+):
     fig, ax = plt.subplots(figsize=(12, 5))
     actual.plot(ax=ax, label="Actual")
 
@@ -36,5 +33,30 @@ def plot_forecast(
     ax.legend()
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
+    return fig
+
+
+def plot_forecast(
+    actual: pd.Series,
+    forecast: pd.DataFrame | pd.Series,
+    output_path: str | Path,
+    title: str = "Energy Forecast",
+) -> None:
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig = _build_forecast_figure(actual=actual, forecast=forecast, title=title)
     fig.savefig(output_path, dpi=160)
     plt.close(fig)
+
+
+def plot_forecast_bytes(
+    actual: pd.Series,
+    forecast: pd.DataFrame | pd.Series,
+    title: str = "Energy Forecast",
+) -> bytes:
+    fig = _build_forecast_figure(actual=actual, forecast=forecast, title=title)
+    buffer = BytesIO()
+    fig.savefig(buffer, format="png", dpi=160)
+    plt.close(fig)
+    buffer.seek(0)
+    return buffer.getvalue()
