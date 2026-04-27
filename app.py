@@ -1,27 +1,44 @@
-import streamlit as st
-import pandas as pd
 from pathlib import Path
 import sys
-import os
 
-# Add src to sys.path to ensure energy_modeling is importable
-sys.path.insert(0, os.path.abspath("src"))
+import pandas as pd
+import streamlit as st
+
+APP_DIR = Path(__file__).resolve().parent
+SRC_DIR = APP_DIR / "src"
+DEFAULT_CONFIG_PATH = APP_DIR / "config" / "default.yaml"
+
+# Resolve imports relative to this file so the app works in hosted environments.
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from energy_modeling.config import load_settings
-from energy_modeling.pipeline import run_training, load_and_prepare
+from energy_modeling.pipeline import run_training
+
+
+def resolve_config_path(raw_path: str) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = APP_DIR / path
+    return path.resolve()
+
 
 st.set_page_config(page_title="Energy Forecasting System", layout="wide")
 
-st.title("⚡ Energy Forecasting System")
-st.markdown("""
-Upload your energy consumption data (.xlsx) to train models and generate forecasts.
-""")
+st.title("Energy Forecasting System")
+st.markdown(
+    """
+Upload your energy consumption data (`.xlsx`) to train models and generate forecasts.
+This app is compatible with cloud hosting because it reads uploaded files directly
+instead of requiring the workbook to exist on the server.
+"""
+)
 
-# Sidebar settings
 st.sidebar.header("Settings")
-config_path = st.sidebar.text_input("Config Path", "config/default.yaml")
+config_path_input = st.sidebar.text_input("Config Path", str(DEFAULT_CONFIG_PATH.relative_to(APP_DIR)))
+config_path = resolve_config_path(config_path_input)
 
-if not os.path.exists(config_path):
+if not config_path.exists():
     st.error(f"Config file not found: {config_path}")
     st.stop()
 
@@ -35,7 +52,7 @@ if uploaded_file is not None:
     try:
         # Read the file into a dataframe
         # We need to know the sheet name from settings or let user choose
-        data_cfg = settings.get("data")
+        data_cfg = settings.get("data", default={}) or {}
         sheet_name = data_cfg.get("sheet_name", "Foglio1")
         
         df = pd.read_excel(uploaded_file, sheet_name=sheet_name, engine="openpyxl")
@@ -44,12 +61,12 @@ if uploaded_file is not None:
         st.subheader("Data Preview")
         st.dataframe(df.head())
         
-        # Process data
         if st.button("Run Training and Forecast"):
             with st.spinner("Processing data and training models..."):
                 try:
-                    # Run the pipeline with the uploaded dataframe
-                    results = run_training(settings, df=df)
+                    results = run_training(settings, df=df, persist_artifacts=False)
+                    metrics_df = results["metrics_df"]
+                    forecast_df = results["forecast_df"]
                     
                     st.header("2. Results")
                     
@@ -57,26 +74,26 @@ if uploaded_file is not None:
                     
                     with col1:
                         st.subheader("Model Metrics")
-                        metrics_df = pd.read_csv(results["metrics"])
                         st.table(metrics_df)
                     
                     with col2:
                         st.subheader("Forecast Plot")
-                        if os.path.exists(results["plot"]):
-                            st.image(str(results["plot"]))
-                        else:
-                            st.warning("Plot not found.")
+                        st.image(results["plot_bytes"])
                             
                     st.subheader("Detailed Forecast Data")
-                    forecast_df = pd.read_csv(results["forecast"])
                     st.dataframe(forecast_df)
                     
-                    # Download buttons
                     st.download_button(
                         label="Download Forecast CSV",
                         data=forecast_df.to_csv(index=False),
                         file_name="forecast_results.csv",
                         mime="text/csv"
+                    )
+                    st.download_button(
+                        label="Download Model Bundle",
+                        data=results["model_bytes"],
+                        file_name="trained_model.joblib",
+                        mime="application/octet-stream"
                     )
                     
                 except Exception as e:
