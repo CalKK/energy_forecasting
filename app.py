@@ -1,5 +1,4 @@
 from pathlib import Path
-import importlib.util
 import sys
 
 import pandas as pd
@@ -9,38 +8,32 @@ APP_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG_PATH = APP_DIR / "config" / "default.yaml"
 
 
-def load_local_package_from_src() -> Path:
-    candidate_package_dirs = [
-        APP_DIR / "src" / "energy_modeling",
-        Path.cwd() / "src" / "energy_modeling",
-        APP_DIR.parent / "src" / "energy_modeling",
-    ]
-    package_dir = next((path for path in candidate_package_dirs if path.exists()), None)
-    if package_dir is None:
-        searched = "\n".join(str(path) for path in candidate_package_dirs)
-        raise ImportError(f"Could not find local package directory.\nSearched:\n{searched}")
+def find_src_root() -> Path:
+    search_bases = [APP_DIR, *APP_DIR.parents, Path.cwd(), *Path.cwd().parents]
+    checked_paths: list[Path] = []
+    seen: set[Path] = set()
 
-    if "energy_modeling" not in sys.modules:
-        init_file = package_dir / "__init__.py"
-        spec = importlib.util.spec_from_file_location(
-            "energy_modeling",
-            init_file,
-            submodule_search_locations=[str(package_dir)],
-        )
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Could not create import spec for {init_file}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["energy_modeling"] = module
-        spec.loader.exec_module(module)
+    for base in search_bases:
+        src_root = (base / "src").resolve()
+        package_init = src_root / "energy_modeling" / "__init__.py"
+        if src_root in seen:
+            continue
+        seen.add(src_root)
+        checked_paths.append(src_root)
+        if package_init.exists():
+            return src_root
 
-    return package_dir
+    searched = "\n".join(str(path) for path in checked_paths)
+    raise ImportError(f"Could not find a valid src root containing energy_modeling.\nSearched:\n{searched}")
 
 
 try:
-    PACKAGE_DIR = load_local_package_from_src()
+    SRC_ROOT = find_src_root()
+    if str(SRC_ROOT) not in sys.path:
+        sys.path.insert(0, str(SRC_ROOT))
     from energy_modeling.config import load_settings
     from energy_modeling.pipeline import run_training
-except ImportError as exc:
+except Exception as exc:
     st.set_page_config(page_title="Energy Forecasting System", layout="wide")
     st.error("Failed to load the local `energy_modeling` package from `src/`.")
     st.code(
@@ -48,8 +41,9 @@ except ImportError as exc:
             [
                 f"APP_DIR={APP_DIR}",
                 f"CWD={Path.cwd()}",
-                f"PACKAGE_DIR={locals().get('PACKAGE_DIR', 'not found')}",
-                f"ImportError={exc}",
+                f"SRC_ROOT={locals().get('SRC_ROOT', 'not found')}",
+                f"sys.path[0:5]={sys.path[:5]}",
+                f"{type(exc).__name__}={exc}",
             ]
         )
     )
